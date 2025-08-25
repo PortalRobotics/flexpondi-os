@@ -1,0 +1,193 @@
+name: Test Rocky aarch64 ISO
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: 'The ID of the build-aarch64 workflow run to download the artifact from'
+        required: false
+        type: string
+
+jobs:
+  test-aarch64:
+    runs-on: [self-hosted, ARM64]
+    steps:
+      - name: Fix Working Directory Permissions
+        run: |
+          WORK_DIR="/home/runner/actions-runner/_work/Kickstart/Kickstart"
+          echo "Checking permissions on working directory: $WORK_DIR"
+          if [ -d "$WORK_DIR" ]; then
+            echo "Before fixing permissions:"
+            ls -ld "$WORK_DIR"
+            find "$WORK_DIR" -exec ls -ld {} \; | head -n 20
+            echo "Fixing ownership to runner:runner..."
+            sudo chown -R runner:runner "$WORK_DIR"
+            echo "Fixing permissions to ensure read/write access..."
+            sudo chmod -R u+rw "$WORK_DIR"
+            echo "After fixing permissions:"
+            ls -ld "$WORK_DIR"
+            find "$WORK_DIR" -exec ls -ld {} \; | head -n 20
+          else
+            echo "Working directory does not exist yet: $WORK_DIR"
+          fi
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          sudo dnf install -y jq unzip edk2-aarch64
+          if [ ! -f /usr/libexec/qemu-kvm ]; then
+            echo "Error: /usr/libexec/qemu-kvm not found"
+            exit 1
+          fi
+          if [ ! -f /usr/share/edk2/aarch64/QEMU_EFI.fd ]; then
+            echo "Error: OVMF firmware not found"
+            exit 1
+          fi
+
+      - name: Get Latest Build Run ID
+        if: ${{ !inputs.build_run_id }}
+        run: |
+          # Fetch the latest successful run of the "Build and Test Rocky aarch64 ISO" workflow
+          RUNS=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/buildaarch64-iso.yml/runs?status=success&branch=main")
+          LATEST_RUN=$(echo "$RUNS" | jq -r '.workflow_runs[0].id')
+          if [ -z "$LATEST_RUN" ] || [ "$LATEST_RUN" == "null" ]; then
+            echo "Error: No successful build runs found for 'Build and Test Rocky aarch64 ISO'"
+            exit 1
+          fi
+          echo "Using build run ID: $LATEST_RUN"
+          # Fetch artifacts for the build run
+          ARTIFACTS=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/runs/$LATEST_RUN/artifacts")
+          # Find the artifact starting with "Flexpondi_aarch64_"
+          ARTIFACT_ID=$(echo "$ARTIFACTS" | jq -r '.artifacts[] | select(.name | startswith("Flexpondi_aarch64_")) | .id')
+          ARTIFACT_NAME=$(echo "$ARTIFACTS" | jq -r '.artifacts[] | select(.name | startswith("Flexpondi_aarch64_")) | .name')
+          if [ -z "$ARTIFACT_ID" ] || [ -z "$ARTIFACT_NAME" ]; then
+            echo "Error: Artifact starting with 'Flexpondi_aarch64_' not found in build run $LATEST_RUN"
+            exit 1
+          fi
+          # Check if the artifact has expired
+          ARTIFACT_DETAILS=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/$ARTIFACT_ID")
+          ARTIFACT_EXPIRED=$(echo "$ARTIFACT_DETAILS" | jq -r '.expired')
+          if [ "$ARTIFACT_EXPIRED" == "true" ]; then
+            echo "Error: Artifact expired"
+            exit 1
+          fi
+          ARTIFACT_URL=$(echo "$ARTIFACT_DETAILS" | jq -r '.archive_download_url')
+          if [ -z "$ARTIFACT_URL" ] || [ "$ARTIFACT_URL" == "null" ]; then
+            echo "Error: Unable to retrieve artifact URL"
+            exit 1
+          fi
+          echo "artifact_url=$ARTIFACT_URL" >> $GITHUB_ENV
+          echo "build_run_id=$LATEST_RUN" >> $GITHUB_ENV
+          echo "artifact_name=$ARTIFACT_NAME" >> $GITHUB_ENV
+
+      - name: Set Build Run ID from Input
+        if: ${{ inputs.build_run_id }}
+        run: |
+          echo "build_run_id=${{ inputs.build_run_id }}" >> $GITHUB_ENV
+          # Fetch artifacts for the specified build run
+          ARTIFACTS=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ inputs.build_run_id }}/artifacts")
+          ARTIFACT_ID=$(echo "$ARTIFACTS" | jq -r '.artifacts[] | select(.name | startswith("Flexpondi_aarch64_")) | .id')
+          ARTIFACT_NAME=$(echo "$ARTIFACTS" | jq -r '.artifacts[] | select(.name | startswith("Flexpondi_aarch64_")) | .name')
+          if [ -z "$ARTIFACT_ID" ] || [ -z "$ARTIFACT_NAME" ]; then
+            echo "Error: Artifact starting with 'Flexpondi_aarch64_' not found in build run ${{ inputs.build_run_id }}"
+            exit 1
+          fi
+          ARTIFACT_DETAILS=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/$ARTIFACT_ID")
+          ARTIFACT_URL=$(echo "$ARTIFACT_DETAILS" | jq -r '.archive_download_url')
+          echo "artifact_url=$ARTIFACT_URL" >> $GITHUB_ENV
+          echo "artifact_name=$ARTIFACT_NAME" >> $GITHUB_ENV
+
+      - name: Check Disk Space
+        run: |
+          df -h /home/runner/actions-runner/_work
+          if [ $(df -B1 /home/runner/actions-runner/_work | tail -1 | awk '{print $4}') -lt 2000000000 ]; then
+            echo "Error: Insufficient disk space"
+            exit 1
+          fi
+
+      - name: Manual Download with curl
+        run: |
+          curl -L -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            -o custom-rocky-aarch64-iso.zip \
+            "${{ env.artifact_url }}"
+          unzip custom-rocky-aarch64-iso.zip
+          ls -lh Flexpondi_aarch64_*.iso
+
+      - name: Inspect ISO Contents
+        run: |
+          sudo mkdir -p /mnt/iso
+          sudo mount -o loop Flexpondi_aarch64_*.iso /mnt/iso
+          echo "ISO contents:"
+          ls -lh /mnt/iso
+          if [ -f /mnt/iso/ks.cfg ]; then
+            echo "Kickstart file found:"
+            cat /mnt/iso/ks.cfg
+          else
+            echo "Error: ks.cfg not found in ISO root"
+            exit 1
+          fi
+          if [ -f /mnt/iso/EFI/BOOT/grub.cfg ]; then
+            echo "GRUB config found:"
+            cat /mnt/iso/EFI/BOOT/grub.cfg
+            if grep -q "inst.ks=cdrom:/ks.cfg" /mnt/iso/EFI/BOOT/grub.cfg || grep -q "inst.ks=hd:LABEL=Custom_Rocky_9.5:/ks.cfg" /mnt/iso/EFI/BOOT/grub.cfg; then
+              echo "GRUB correctly configured"
+            else
+              echo "Error: GRUB does not reference a valid inst.ks path"
+              exit 1
+            fi
+          else
+            echo "Error: GRUB config not found"
+            exit 1
+          fi
+          sudo umount /mnt/iso || sudo umount -l /mnt/iso
+          sudo rmdir /mnt/iso || true
+
+      - name: Test ISO with QEMU/KVM (UEFI Mode)
+        run: |
+          /usr/libexec/qemu-kvm \
+            -m 2048 \
+            -M virt \
+            -cpu max \
+            -cdrom Flexpondi_aarch64_*.iso \
+            -boot d \
+            -nographic \
+            -serial mon:stdio \
+            -bios /usr/share/edk2/aarch64/QEMU_EFI.fd \
+            -netdev user,id=net0 -device virtio-net-device,netdev=net0 \
+            -d guest_errors,unimp > qemu_debug.log 2>&1 &
+          QEMU_PID=$!
+          echo "Running QEMU for 600 seconds to allow Kickstart installation..."
+          sleep 600
+          if ps -p $QEMU_PID > /dev/null; then
+            echo "Stopping QEMU..."
+            kill $QEMU_PID
+            wait $QEMU_PID || true
+          fi
+          if [ -f qemu_debug.log ]; then
+            echo "QEMU debug log:"
+            cat qemu_debug.log
+          fi
+        continue-on-error: true
+
+      - name: Upload QEMU Debug Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-debug-log
+          path: qemu_debug.log

@@ -1,0 +1,133 @@
+name: Build and Test Rocky aarch64 rpi IMG
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/build-img.aarch64-rpi.yml'
+  workflow_dispatch:
+
+# Grant necessary permissions to the GITHUB_TOKEN
+permissions:
+  contents: write
+
+jobs:
+  build-aarch64-rpi:
+    runs-on: [self-hosted, ARM64]
+    outputs:
+      img_name: ${{ steps.build_img.outputs.img_name }}
+      artifact_name: ${{ steps.build_img.outputs.artifact_name }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download Rocky aarch64 Raspberry Pi img.xz
+        run: |
+          curl -L -o rocky-rpi.img.xz https://dl.rockylinux.org/pub/sig/9/altarch/aarch64/images/RockyLinuxRpi_9-latest.img.xz
+      
+      - name: Extract Rocky aarch64 Raspberry Pi img
+        run: |
+          xz -d rocky-rpi.img.xz
+
+      - name: Create Custom IMG with firstboot
+        id: build_img
+        run: |
+          TIMESTAMP=$(date +%Y%m%d_%H%M)
+          IMAGE_NAME="Flexpondi_aarch64_rpi_${TIMESTAMP}.img"
+          ARTIFACT_NAME="Flexpondi_aarch64_rpi_${TIMESTAMP}"
+
+          # Verify rpi/firstboot.sh exists
+          if [ ! -f rpi/firstboot.sh ]; then
+            echo "Error: rpi/firstboot.sh not found in repository root"
+            echo "Current directory contents:"
+            ls -la
+            exit 1
+          fi
+
+          # Verify rpi/firstboot.service exists
+          if [ ! -f rpi/firstboot.service ]; then
+            echo "Error: rpi/firstboot.service not found in repository root"
+            echo "Current directory contents:"
+            ls -la
+            exit 1
+          fi
+
+          echo "firstboot files found:"
+          ls -l rpi/
+
+
+          echo "mounting base image for modification"
+          # Copy original image to a working copy
+          fdisk -l rocky-rpi.img
+          cp rocky-rpi.img ${IMAGE_NAME}
+
+          PART_START=$(fdisk -l ${IMAGE_NAME} | grep "^${IMAGE_NAME}3" | awk '{ print $2 }')
+            if [ -z "$PART_START" ]; then
+          echo "❌ Could not find start sector for partition 3"
+          fdisk -l $IMG_NAME
+          exit 1
+          fi
+
+          OFFSET=$((PART_START * 512))
+          echo "✅ Partition 3 starts at sector $PART_START → byte offset $OFFSET"
+
+          # Mount rootfs
+          sudo mkdir -p /mnt/rpi_root
+          sudo mount -o loop,offset=$OFFSET ${IMAGE_NAME} /mnt/rpi_root
+
+          ls -l /mnt/rpi_root/etc/systemd/system/
+          ls -l /mnt/rpi_root/root/
+
+          # CHANGE HERE
+          echo "embedding rpi/firstboot.sh to image at /root/"
+          
+          sudo cp rpi/firstboot.sh /mnt/rpi_root/root/firstboot.sh
+          sudo chmod +x /mnt/rpi_root/root/firstboot.sh
+          
+          sudo cp rpi/firstboot.service /mnt/rpi_root/etc/systemd/system/firstboot.service
+          sudo mkdir -p /mnt/rpi_root/etc/systemd/system/multi-user.target.wants
+          sudo ln -sf ../firstboot.service /mnt/rpi_root/etc/systemd/system/multi-user.target.wants/firstboot.service
+
+
+
+          # Verify firstboot.sh
+          if [ -f /mnt/rpi_root/root/firstboot.sh ]; then
+            echo "Success: firstboot.sh embedded at /root/firstboot.sh in IMG"
+            ls -l /mnt/rpi_root/root/firstboot.sh
+          else
+            echo "Error: firstboot.sh not found at /root/firstboot.sh in IMG"
+            ls -l /mnt/rpi_root/root/firstboot.sh
+            exit 1
+          fi
+          
+          # Verify firstboot.service
+          if [ -f /mnt/rpi_root/etc/systemd/system/firstboot.service ]; then
+            echo "Success: firstboot.service embedded at /etc/systemd/system/firstboot.service in IMG"
+            ls -l /mnt/rpi_root/etc/systemd/system/firstboot.service
+          else
+            echo "Error: firstboot.service not found at /etc/systemd/system/firstboot.service in IMG"
+            ls -l /mnt/rpi_root/etc/systemd/system/firstboot.service
+            exit 1
+          fi
+
+          sudo umount /mnt/rpi_root || sudo umount -l /mnt/rpi_root
+          rmdir /mnt/rpi_root || true
+
+          echo "img_name=${IMAGE_NAME}" >> $GITHUB_OUTPUT
+          echo "artifact_name=${ARTIFACT_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Upload IMG Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.build_img.outputs.artifact_name }}
+          path: ${{ steps.build_img.outputs.img_name }}
+
+      - name: Clean Up Temporary Files
+        run: |
+          if [ -f rocky-rpi.img ]; then
+            rm -f rocky-rpi.img
+          fi
+          if [ -n "${{ steps.build_img.outputs.img_name }}" ] && [ -f "${{ steps.build_img.outputs.img_name }}" ]; then
+            rm -f "${{ steps.build_img.outputs.img_name }}"
+          fi

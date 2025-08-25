@@ -1,0 +1,97 @@
+name: Build Rocky ISO with Kickstart
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/build-iso.x86.yml'
+  workflow_dispatch:
+
+# Grant necessary permissions to the GITHUB_TOKEN
+permissions:
+  contents: write  # Required for creating releases and uploading assets
+
+jobs:
+  build-iso:
+    runs-on: ubuntu-latest
+    steps:
+      # Step 1: Checkout the repository
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # Step 2: Install dependencies
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y genisoimage xorriso curl p7zip-full
+
+      # Step 3: Download Rocky Linux ISO
+      - name: Download Rocky ISO
+        run: |
+          curl -L -o rocky.iso https://download.rockylinux.org/pub/rocky/9/isos/x86_64/Rocky-9-latest-x86_64-minimal.iso
+
+      # Step 4: Extract ISO contents
+      - name: Extract ISO
+        run: |
+          mkdir -p iso_contents
+          7z x rocky.iso -o./iso_contents
+
+      # Step 5: Inject boot.msg, ks.cfg, and isolinux.cfg
+      - name: Inject Custom Files
+        run: |
+          cp boot.msg iso_contents/isolinux/boot.msg
+          cp ks.cfg iso_contents/ks.cfg
+          cp isolinux.cfg iso_contents/isolinux/isolinux.cfg
+
+      # Step 6: Rebuild the ISO with timestamped filename
+      - name: Build Custom ISO
+        id: build_iso
+        run: |
+          TIMESTAMP=$(date +%Y%m%d_%H%M)
+          ISO_NAME="Flexpondi_x86_64_${TIMESTAMP}.iso"
+          xorriso -as mkisofs \
+            -o ${ISO_NAME} \
+            -b isolinux/isolinux.bin \
+            -c isolinux/boot.cat \
+            -no-emul-boot \
+            -boot-load-size 4 \
+            -boot-info-table \
+            -eltorito-alt-boot \
+            -e images/efiboot.img \
+            -no-emul-boot \
+            -V "Custom_Rocky_9.3" \
+            -r -J -joliet-long \
+            iso_contents/
+          echo "timestamp=${TIMESTAMP}" >> $GITHUB_OUTPUT
+          echo "iso_name=${ISO_NAME}" >> $GITHUB_OUTPUT
+
+      # Step 7: Create a GitHub Release
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: "build-${{ github.run_id }}"
+          release_name: "Build ${{ github.run_id }} - ${{ github.sha }}"
+          draft: false
+          prerelease: false
+
+      # Step 8: Upload ISO to GitHub Release
+      - name: Upload ISO to Release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ${{ steps.build_iso.outputs.iso_name }}
+          asset_name: ${{ steps.build_iso.outputs.iso_name }}
+          asset_content_type: application/octet-stream
+
+      # Step 9: Upload the ISO as an artifact (optional)
+      - name: Upload ISO Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: custom-rocky-iso
+          path: Flexpondi_x86_64_*.iso

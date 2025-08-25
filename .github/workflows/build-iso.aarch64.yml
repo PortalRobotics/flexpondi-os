@@ -1,0 +1,91 @@
+name: Build and Test Rocky aarch64 ISO
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/build-iso.aarch64.yml'
+  workflow_dispatch:
+
+# Grant necessary permissions to the GITHUB_TOKEN
+permissions:
+  contents: write
+
+jobs:
+  build-aarch64:
+    runs-on: [self-hosted, ARM64]
+    outputs:
+      iso_name: ${{ steps.build_iso.outputs.iso_name }}
+      artifact_name: ${{ steps.build_iso.outputs.artifact_name }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install lorax and Dependencies
+        run: |
+          sudo dnf install -y lorax genisoimage
+
+      - name: Download Rocky aarch64 ISO
+        run: |
+          curl -L -o rocky.iso https://download.rockylinux.org/pub/rocky/9.5/isos/aarch64/Rocky-9-latest-aarch64-minimal.iso
+
+      - name: Create Custom ISO with mkksiso
+        id: build_iso
+        run: |
+          TIMESTAMP=$(date +%Y%m%d_%H%M)
+          ISO_NAME="Flexpondi_aarch64_${TIMESTAMP}.iso"
+          ARTIFACT_NAME="Flexpondi_aarch64_${TIMESTAMP}"
+          # Verify ks.cfg exists
+          if [ ! -f ks.cfg ]; then
+            echo "Error: ks.cfg not found in repository root"
+            echo "Current directory contents:"
+            ls -la
+            exit 1
+          fi
+          echo "Kickstart file found:"
+          ls -l ks.cfg
+          # Run mkksiso to embed ks.cfg at /ks.cfg
+          sudo mkksiso --ks ks.cfg -V "Custom_Rocky_9.5" rocky.iso ${ISO_NAME}
+          # Verify ks.cfg and GRUB
+          sudo mkdir -p /mnt/iso
+          sudo mount -o loop ${ISO_NAME} /mnt/iso
+          if [ -f /mnt/iso/ks.cfg ]; then
+            echo "Success: ks.cfg embedded at /ks.cfg in ISO"
+            ls -l /mnt/iso/ks.cfg
+          else
+            echo "Error: ks.cfg not found at /ks.cfg in ISO"
+            ls -l /mnt/iso
+            exit 1
+          fi
+          if [ -f /mnt/iso/EFI/BOOT/grub.cfg ]; then
+            if grep -q "inst.ks=cdrom:/ks.cfg" /mnt/iso/EFI/BOOT/grub.cfg || grep -q "inst.ks=hd:LABEL=Custom_Rocky_9.5:/ks.cfg" /mnt/iso/EFI/BOOT/grub.cfg; then
+              echo "Success: GRUB configured with valid inst.ks reference"
+            else
+              echo "Error: GRUB does not reference a valid inst.ks path"
+              cat /mnt/iso/EFI/BOOT/grub.cfg
+              exit 1
+            fi
+          else
+            echo "Error: GRUB config not found in ISO"
+            exit 1
+          fi
+          sudo umount /mnt/iso || sudo umount -l /mnt/iso
+          sudo rmdir /mnt/iso || true
+          echo "iso_name=${ISO_NAME}" >> $GITHUB_OUTPUT
+          echo "artifact_name=${ARTIFACT_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Upload ISO Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.build_iso.outputs.artifact_name }}
+          path: ${{ steps.build_iso.outputs.iso_name }}
+
+      - name: Clean Up Temporary Files
+        run: |
+          if [ -f rocky.iso ]; then
+            rm -f rocky.iso
+          fi
+          if [ -n "${{ steps.build_iso.outputs.iso_name }}" ] && [ -f "${{ steps.build_iso.outputs.iso_name }}" ]; then
+            rm -f "${{ steps.build_iso.outputs.iso_name }}"
+          fi
