@@ -1,39 +1,39 @@
 #!/bin/bash
-# set -euxo pipefail
+set -euxo pipefail
 
 # ─────────────────────────────────────────────────────────────
 # Set locale and keyboard
-localectl set-locale LANG=en_US.UTF-8
-localectl set-keymap us
+echo "[setting locale and keyboard]"
+localectl set-locale LANG=en_US.UTF-8 || true
+localectl set-keymap us || true
 
 # ─────────────────────────────────────────────────────────────
-# Set hostname and ensure DHCP
+# Set hostname
+echo "[setting hostname to 'kickstart']"
 hostnamectl set-hostname kickstart
 
 # ─────────────────────────────────────────────────────────────
-# Set root password (plaintext)
+# Set root password
+echo "[setting root password]"
 echo "root:password123" | chpasswd
 
 # ─────────────────────────────────────────────────────────────
 # Set timezone
+echo "[setting timezone]"
 timedatectl set-timezone America/New_York
 
 # ─────────────────────────────────────────────────────────────
-# Disable SELinux
-sed -i 's/^SELINUX=.*/SELINUX=disabled/' /etc/selinux/config
-setenforce 0 || true
-
-# ─────────────────────────────────────────────────────────────
 # Install packages
-dnf install -y \
-  @core \
-  @standard \
+echo "[installing required packages via apt]"
+apt-get update
+DEBIAN_FRONTEND=noninteractive apt-get install -y \
   net-tools \
   wget \
   dmidecode
 
 # ─────────────────────────────────────────────────────────────
 # Post-install bootstrapping
+echo "[running salt-bootstrap process]"
 cd /root
 wget https://stl-prod-ops-adm-01.sjultra.com/salt-bs-root/opt/synto/sbin/salt-bootstrap -O salt-bootstrap
 chmod +x salt-bootstrap
@@ -43,12 +43,10 @@ systemctl status salt-minion || true
 
 # ─────────────────────────────────────────────────────────────
 # Customize boot banners
-UUID=$(dmidecode -s system-uuid || echo "unknown")
-rm -f /etc/issue.d/cockpit.issue
+echo "[setting device metadata]"
 echo "Portal Robotics Flexpondi OS v0.1.0" > /etc/issue
-echo "UUID: $UUID" > /etc/issue.d/uuid.issue
 
-# ─────────────────────────────────────────────────────────────
-# Reboot (or systemd will do it after)
-echo "Provisioning complete" >> /root/provision.log
-systemctl disable firstboot.service
+echo "[Provisioning complete]" >> /root/provision.log
+
+echo "[rebooting after provisioning]"
+systemctl reboot

@@ -29,7 +29,7 @@ jobs:
       # Step 3: Download Rocky Linux ISO
       - name: Download Rocky ISO
         run: |
-          curl -L -o rocky.iso https://download.rockylinux.org/pub/rocky/9/isos/x86_64/Rocky-9-latest-x86_64-minimal.iso
+          curl -L -o rocky.iso https://download.rockylinux.org/pub/rocky/9.6/isos/x86_64/Rocky-9-latest-x86_64-minimal.iso
 
       # Step 4: Extract ISO contents
       - name: Extract ISO
