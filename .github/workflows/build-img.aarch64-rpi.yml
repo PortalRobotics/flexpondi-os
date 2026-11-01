@@ -1,4 +1,6 @@
-name: Build and Test Rocky aarch64 rpi IMG
+# Builds a custom Rocky Linux aarch64 Raspberry Pi image with firstboot and uploads it as an artifact.
+# Runs on push to this file or manual dispatch, on the self-hosted ARM64 runner.
+name: "[E-STALE] Build and Test Rocky aarch64 rpi IMG"
 
 on:
   push:

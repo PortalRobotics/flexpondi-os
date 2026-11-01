@@ -1,4 +1,6 @@
-name: Build and Test Rocky aarch64 ISO
+# Builds a custom Rocky Linux aarch64 ISO with Kickstart and uploads it as an artifact.
+# Runs on push to this file or manual dispatch, on the self-hosted ARM64 runner.
+name: "[E-STALE] Build and Test Rocky aarch64 ISO"
 
 on:
   push:

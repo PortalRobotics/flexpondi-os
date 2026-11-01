@@ -1,4 +1,6 @@
-name: Build Rocky ISO with Kickstart
+# Builds a custom Rocky Linux x86_64 ISO with Kickstart and publishes it as a GitHub release.
+# Runs on push to this file or manual dispatch.
+name: "[E-FAIL] Build Rocky ISO with Kickstart"
 
 on:
   push:
