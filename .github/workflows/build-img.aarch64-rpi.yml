@@ -3,11 +3,6 @@
 name: "[E-STALE] Build and Test Rocky aarch64 rpi IMG"
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - '.github/workflows/build-img.aarch64-rpi.yml'
   workflow_dispatch:
 
 # Grant necessary permissions to the GITHUB_TOKEN
