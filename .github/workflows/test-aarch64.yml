@@ -3,9 +3,6 @@
 name: "[E-STALE] Test Rocky aarch64 ISO"
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
     inputs:
       build_run_id:

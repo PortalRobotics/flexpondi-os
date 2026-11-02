@@ -3,11 +3,6 @@
 name: "[E-FAIL] Build Rocky ISO with Kickstart"
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - '.github/workflows/build-iso.x86.yml'
   workflow_dispatch:
 
 # Grant necessary permissions to the GITHUB_TOKEN
