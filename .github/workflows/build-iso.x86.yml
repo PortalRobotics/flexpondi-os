@@ -1,8 +1,11 @@
-# Builds a custom Rocky Linux x86_64 ISO with Kickstart and publishes it as a GitHub release.
-# Runs on push to this file or manual dispatch.
-name: "[E-FAIL] Build Rocky ISO with Kickstart"
+name: Build Rocky ISO with Kickstart
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/build-iso.x86.yml'
   workflow_dispatch:
 
 # Grant necessary permissions to the GITHUB_TOKEN
