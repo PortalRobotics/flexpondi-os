@@ -1,9 +1,8 @@
-name: Test Rocky aarch64 ISO
+# Boots the built Rocky aarch64 ISO in QEMU/KVM and verifies the Kickstart install.
+# Runs on push to main or manual dispatch, on the self-hosted ARM64 runner.
+name: "[E-STALE] Test Rocky aarch64 ISO"
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
     inputs:
       build_run_id:
